@@ -13,7 +13,7 @@
 static const char* ssid     = "SSID";         // The SSID (name) of the Wi-Fi network you want to connect to
 static const char* password = "PASSWORD";     // The password of the Wi-Fi network
 static const char* telegram_token = "XXXXXX:YYYYYYYYYYY"; // Telegram bot
-static const char* chatId = "YOUR_CHAT_ID";
+static const char* chat_id = "YOUR_CHAT_ID";
 
 // Constants
 #define DHTPIN 12 // Change this pin by yours
@@ -28,18 +28,13 @@ const float minTemp = 18.0; // Min temperature for alerting system
 const float maxHum = 85.0;  // Max humidity for alerting system
 const float minHum = 50.0;  // Min humidity for alerting system
 
-WiFiClientSecure net_ssl; 
-UniversalTelegramBot tbot(telegram_token, net_ssl);
-int Bot_mtbs = 1000; //mean time between scan messages
-long Bot_lasttime;
-bool ack = false; 
-
-// Create AsyncWebServer object on port 80
-AsyncWebServer server(80);
+int bot_mtbs = 1000; //mean time between scan messages
+long bot_lasttime;
+bool ack = false; // Alert acknowledge flag
 
 // Generally, you should use "unsigned long" for variables that hold time
 // The value will quickly become too large for an int to store
-unsigned long previousMillis = 0;    // will store last time DHT was updated
+unsigned long previous_millis = 0;    // will store last time DHT was updated
 
 // Updates DHT readings every 10 seconds
 const long interval = 10000;  
@@ -152,6 +147,7 @@ void processMessage(String chat_id, String text) {
   }
 }
 
+// Verify sensor values against max/min boundaries
 void checkSensorValues(const float metric_value, const float max_metric,
                        const float min_metric, const String metric_name) {
   if (metric_value == 0.0) {
@@ -160,22 +156,33 @@ void checkSensorValues(const float metric_value, const float max_metric,
     if (((metric_value > max_metric) or (metric_value < minTemp)) and (not ack)) {
       String msg = "Alert!!! " + metric_name + " is ";
       msg = msg + metric_value;
-      tbot.sendMessage(chatId, msg, "");
+      tbot.sendMessage(chat_id, msg, "");
     }
   }
 }
 
+// Monitor temperature
 void checkTemp() {
   checkSensorValues(t, maxTemp, minTemp, "Temperature (Celsius)");
 }
 
+// Monitor humidity
 void checkHum() {
   checkSensorValues(h, maxHum, minHum, "Humidity (%)");
 }
 
+// Initialize Telegram bot
+WiFiClientSecure net_ssl; 
+UniversalTelegramBot tbot(telegram_token, net_ssl);
+
+// Start AsyncWebServer on port 80
+AsyncWebServer server(80);
+
 void setup(){
   // Serial port for debugging purposes
   Serial.begin(9600);
+
+  // Start sensor
   dht.begin();
   
   // Connect to Wi-Fi
@@ -208,48 +215,47 @@ void setup(){
 }
  
 void loop(){
-  unsigned long currentMillis = millis();
-  if (currentMillis - previousMillis >= interval) {
+  unsigned long current_millis = millis();
+  if (current_millis - previous_millis >= interval) {
     // save the last time you updated the DHT values
-    previousMillis = currentMillis;
+    previous_millis = current_millis;
     // Read temperature as Celsius (the default)
-    float newT = dht.readTemperature();
-    // Read temperature as Fahrenheit (isFahrenheit = true)
-    //float newT = dht.readTemperature(true);
+    float new_temp = dht.readTemperature();
     // if temperature read failed, don't change t value
-    if (isnan(newT)) {
+    if (isnan(new_temp)) {
       Serial.println("Failed to read from DHT sensor!");
     }
     else {
-      t = newT;
+      t = new_temp;
       Serial.println(t);
       checkTemp();
     }
     // Read Humidity
-    float newH = dht.readHumidity();
+    float new_hum = dht.readHumidity();
     // if humidity read failed, don't change h value 
-    if (isnan(newH)) {
+    if (isnan(new_hum)) {
       Serial.println("Failed to read from DHT sensor!");
     }
     else {
-      h = newH;
+      h = new_hum;
       Serial.println(h);
       checkHum();
     }
   }
-  if (millis() > Bot_lasttime + Bot_mtbs)  {
-    int numNewMessages = tbot.getUpdates(tbot.last_message_received + 1);
 
-    while(numNewMessages) {
+  if (millis() > bot_lasttime + bot_mtbs)  {
+    int num_new_messages = tbot.getUpdates(tbot.last_message_received + 1);
+
+    while(num_new_messages) {
       Serial.println("got response");
-      for (int i=0; i<numNewMessages; i++) {
+      for (int i=0; i<num_new_messages; i++) {
         String text = tbot.messages[i].text;
+        // Support commands with upper chars (telegram uppercase autocorrector is a pain in the ass)
         text.toLowerCase();
         processMessage(tbot.messages[i].chat_id, text);
       }
-      numNewMessages = tbot.getUpdates(tbot.last_message_received + 1);
+      num_new_messages = tbot.getUpdates(tbot.last_message_received + 1);
     }
-
-    Bot_lasttime = millis();
+    bot_lasttime = millis();
   }
 }
